@@ -19,6 +19,7 @@ BRACKETS = [  # (เพดานของขั้น, อัตรา) ตร�
 
 # สมมติฐานการหักของทีม (ผู้มีเงินเดือน เงินได้ประเภท 40(1)) ต้องตรวจกับประกาศกรมสรรพากรของปีภาษีที่ใช้
 PERSONAL_ALLOWANCE = 60_000          # ค่าลดหย่อนส่วนตัว
+SPOUSE_ALLOWANCE = 60_000            # ค่าลดหย่อนคู่สมรสที่ไม่มีเงินได้
 DEPENDENT_ALLOWANCE = 30_000         # ค่าลดหย่อนผู้อยู่ในอุปการะ คนละ
 SOCIAL_SECURITY = 9_000              # เงินสมทบประกันสังคม: ทีมสมมติให้ทุกคนจ่ายเต็มเพดานต่อปี
 EXPENSE_RATE, EXPENSE_CAP = 0.5, 100_000   # ค่าใช้จ่ายร้อยละ 50 ไม่เกิน 100,000
@@ -26,42 +27,52 @@ SENIOR_EXEMPT = 190_000              # เงินได้ที่ยกเ�
 FUND_RATE = 0.30                     # RMF/ThaiESG ไม่เกินร้อยละ 30 ของเงินได้
 RMF_PVD_CAP, ESG_CAP = 500_000, 300_000  # RMF รวม PVD ไม่เกิน 500,000 / ThaiESG ไม่เกิน 300,000
 
+# เกณฑ์รายปีภาษี: ทีมตั้งสมมติฐานว่าพารามิเตอร์ด้านล่างเท่ากันทุกปีที่ให้เลือก (ต้องตรวจกับประกาศกรมสรรพากรก่อนใช้จริง)
+# หากปีใดเกณฑ์เปลี่ยน ให้เพิ่ม/แก้ค่าในตารางนี้ ฟังก์ชันคำนวณทั้งหมดอ่านค่าจากตารางนี้ตามปีที่เลือก
+_BASE = dict(brackets=BRACKETS, personal=PERSONAL_ALLOWANCE, spouse=SPOUSE_ALLOWANCE, dependent=DEPENDENT_ALLOWANCE,
+             social=SOCIAL_SECURITY, expense_rate=EXPENSE_RATE, expense_cap=EXPENSE_CAP, senior=SENIOR_EXEMPT,
+             fund_rate=FUND_RATE, rmf_pvd_cap=RMF_PVD_CAP, esg_cap=ESG_CAP)
+TAX_RULES = {2567: dict(_BASE), 2568: dict(_BASE), 2569: dict(_BASE)}
+DEFAULT_YEAR = 2569
+
 TRAIN_RANGE = {"age": (20, 75), "income": (120_000, 6_000_000)}   # ช่วงข้อมูลที่ใช้ฝึกโมเดล
 RISK_LABELS = {1: "1 ต่ำมาก", 2: "2 ต่ำ", 3: "3 ปานกลาง", 4: "4 สูง", 5: "5 สูงมาก"}
 
 
-def income_tax(net_income):
+def income_tax(net_income, year=DEFAULT_YEAR):
     tax, lower = 0.0, 0.0
-    for upper, rate in BRACKETS:
+    for upper, rate in TAX_RULES[year]["brackets"]:
         if net_income > lower:
             tax += (min(net_income, upper) - lower) * rate
         lower = upper
     return tax
 
 
-def deduction_detail(income, dependents, insurance, pvd, age=40):
+def deduction_detail(income, dependents, insurance, pvd, age=40, spouse=False, year=DEFAULT_YEAR):
     """แจกแจงการหักค่าใช้จ่ายและค่าลดหย่อน (ใช้ทั้งคำนวณและแสดงบนหน้าเว็บ)"""
+    r = TAX_RULES[year]
     items = [
-        ("เงินได้ที่ยกเว้น (อายุ 65 ปีขึ้นไป)", SENIOR_EXEMPT if age >= 65 else 0.0),
-        (f"ค่าใช้จ่าย ({EXPENSE_RATE:.0%} ไม่เกิน {EXPENSE_CAP:,})", min(EXPENSE_RATE * income, EXPENSE_CAP)),
-        ("ค่าลดหย่อนส่วนตัว", PERSONAL_ALLOWANCE),
-        (f"ค่าลดหย่อนผู้อยู่ในอุปการะ ({dependents} คน)", DEPENDENT_ALLOWANCE * dependents),
-        ("ประกันสังคม (สมมติฐานของทีม)", SOCIAL_SECURITY),
+        ("เงินได้ที่ยกเว้น (อายุ 65 ปีขึ้นไป)", r["senior"] if age >= 65 else 0.0),
+        (f"ค่าใช้จ่าย ({r['expense_rate']:.0%} ไม่เกิน {r['expense_cap']:,})", min(r["expense_rate"] * income, r["expense_cap"])),
+        ("ค่าลดหย่อนส่วนตัว", r["personal"]),
+        ("ค่าลดหย่อนคู่สมรส (ไม่มีเงินได้)", r["spouse"] if spouse else 0.0),
+        (f"ค่าลดหย่อนผู้อยู่ในอุปการะ ({dependents} คน)", r["dependent"] * dependents),
+        ("ประกันสังคม (สมมติฐานของทีม)", r["social"]),
         ("เบี้ยประกันชีวิต/สุขภาพ", float(insurance)),
         ("กองทุนสำรองเลี้ยงชีพ (PVD)", float(pvd)),
     ]
     return items
 
 
-def net_income_before_funds(income, dependents, insurance, pvd, age=40):
-    total = sum(v for _, v in deduction_detail(income, dependents, insurance, pvd, age))
+def net_income_before_funds(income, dependents, insurance, pvd, age=40, spouse=False, year=DEFAULT_YEAR):
+    total = sum(v for _, v in deduction_detail(income, dependents, insurance, pvd, age, spouse, year))
     return max(income - total, 0.0)
 
 
-def tax_by_bracket(net_income):
+def tax_by_bracket(net_income, year=DEFAULT_YEAR):
     """ตารางภาษีรายขั้นบันได: (ช่วงเงินได้สุทธิ, อัตรา, เงินได้ในขั้น, ภาษีในขั้น)"""
     rows, lower = [], 0.0
-    for upper, rate in BRACKETS:
+    for upper, rate in TAX_RULES[year]["brackets"]:
         part = max(min(net_income, upper) - lower, 0.0)
         label = f"{lower:,.0f} - {upper:,.0f}" if upper != float("inf") else f"เกิน {lower:,.0f}"
         rows.append((label, rate, part, part * rate))
@@ -130,11 +141,12 @@ def assign_cluster(model, age, income, risk, insurance, pvd, dependents):
     return int(model.predict(row[FEATURES])[0])
 
 
-def plan(age, income, dependents, insurance, pvd, budget, equity_share, invest_override=None):
+def plan(age, income, dependents, insurance, pvd, budget, equity_share, invest_override=None, spouse=False, year=DEFAULT_YEAR):
+    r = TAX_RULES[year]
     """คืนแผนลงทุนใน RMF/ThaiESG และภาษีที่ประหยัดได้"""
-    net = net_income_before_funds(income, dependents, insurance, pvd, age)
-    rmf_cap = max(0.0, min(FUND_RATE * income, RMF_PVD_CAP - pvd))
-    esg_cap = max(0.0, min(FUND_RATE * income, ESG_CAP))
+    net = net_income_before_funds(income, dependents, insurance, pvd, age, spouse, year)
+    rmf_cap = max(0.0, min(r["fund_rate"] * income, r["rmf_pvd_cap"] - pvd))
+    esg_cap = max(0.0, min(r["fund_rate"] * income, r["esg_cap"]))
     cap_total = rmf_cap + esg_cap
     wanted = budget if invest_override is None else invest_override
     invest = float(min(max(wanted, 0.0), cap_total))
@@ -142,12 +154,12 @@ def plan(age, income, dependents, insurance, pvd, budget, equity_share, invest_o
         rmf = min(invest, rmf_cap); esg = invest - rmf
     else:
         esg = min(invest, esg_cap); rmf = invest - esg
-    tax_before = income_tax(net)
-    tax_after = income_tax(max(net - invest, 0.0))
-    tax_max = income_tax(max(net - cap_total, 0.0))
+    tax_before = income_tax(net, year)
+    tax_after = income_tax(max(net - invest, 0.0), year)
+    tax_max = income_tax(max(net - cap_total, 0.0), year)
     return {"net_income": net, "rmf_cap": rmf_cap, "esg_cap": esg_cap, "cap_total": cap_total,
             "invest": invest, "rmf": rmf, "thaiesg": esg,
             "equity_amount": invest * equity_share, "bond_amount": invest * (1 - equity_share),
-            "deductions": deduction_detail(income, dependents, insurance, pvd, age),
+            "deductions": deduction_detail(income, dependents, insurance, pvd, age, spouse, year),
             "tax_before": tax_before, "tax_after": tax_after, "tax_saved": tax_before - tax_after,
             "max_saved": tax_before - tax_max, "limited_by_cap": wanted > cap_total + 1e-9}

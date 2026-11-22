@@ -1,6 +1,9 @@
 import sys
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -39,7 +42,7 @@ PERSONAS = {
     "คุณนที (27 ปี เพิ่งเริ่มงาน รับความเสี่ยงสูง)": dict(age=27, income=420_000, dependents=0, insurance=0, pvd=0, risk=4, budget=25_000),
     "คุณป้าสมศรี (68 ปี มีบำนาญและเงินลงทุน)": dict(age=68, income=500_000, dependents=0, insurance=15_000, pvd=0, risk=1, budget=40_000),
 }
-DEFAULTS = dict(age=35, income=600_000, dependents=0, insurance=0, pvd=0, risk=3, budget=50_000)
+DEFAULTS = dict(year=tc.DEFAULT_YEAR, spouse=False, age=35, income=600_000, dependents=0, insurance=0, pvd=0, risk=3, budget=50_000)
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v)
 
@@ -56,6 +59,7 @@ st.caption("ประเมินภาษีเงินได้บุคค�
 
 st.subheader("ขั้นที่ 1: กรอกข้อมูลของคุณ")
 st.selectbox("เริ่มจากตัวอย่าง หรือกรอกเอง", list(PERSONAS), key="persona", on_change=apply_persona)
+year = st.selectbox("ปีภาษีที่ใช้คำนวณ", sorted(tc.TAX_RULES), key="year", format_func=lambda y: f"ปีภาษี {y}")
 c1, c2 = st.columns(2)
 with c1:
     age = st.number_input("อายุ (ปี)", min_value=20, max_value=100, step=1, key="age")
@@ -65,6 +69,7 @@ with c2:
     insurance = st.number_input("เบี้ยประกันชีวิต/สุขภาพต่อปี (บาท)", min_value=0, max_value=1_000_000, step=1_000, key="insurance")
     pvd = st.number_input("เงินสะสมกองทุนสำรองเลี้ยงชีพต่อปี (บาท)", min_value=0, max_value=1_000_000, step=1_000, key="pvd")
     budget = st.number_input("งบที่ตั้งใจลงทุนในกองทุนลดหย่อนต่อปี (บาท)", min_value=0, max_value=10_000_000, step=5_000, key="budget")
+spouse = st.checkbox("มีคู่สมรสที่ไม่มีเงินได้ (ลดหย่อนคู่สมรสได้)", key="spouse")
 risk = st.select_slider("ความเสี่ยงที่คุณรับได้", options=[1, 2, 3, 4, 5], format_func=lambda r: tc.RISK_LABELS[r], key="risk")
 
 lo_a, hi_a = tc.TRAIN_RANGE["age"]; lo_i, hi_i = tc.TRAIN_RANGE["income"]
@@ -73,7 +78,7 @@ if not (lo_a <= age <= hi_a) or not (lo_i <= income <= hi_i):
 
 cluster = tc.assign_cluster(model, age, income, risk, insurance, pvd, dependents)
 row = profile.loc[cluster]
-result = tc.plan(age, income, dependents, insurance, pvd, budget, row["equity_share"])
+result = tc.plan(age, income, dependents, insurance, pvd, budget, row["equity_share"], spouse=spouse, year=year)
 
 st.subheader("ขั้นที่ 2: ผลการวิเคราะห์")
 st.info(f"**โมเดลจัดคุณอยู่ในกลุ่ม:** {row['description']}  \n"
@@ -89,10 +94,10 @@ ded = pd.DataFrame([("เงินได้ต่อปี", income)] + [(f"ห�
                    + [("เงินได้สุทธิก่อนซื้อกองทุน", result["net_income"])], columns=["รายการ", "บาท"])
 ded["บาท"] = ded["บาท"].map(lambda x: f"{x:,.0f}")
 st.dataframe(ded, hide_index=True, use_container_width=True)
-st.caption("เกณฑ์ที่ใช้: ผู้มีเงินเดือน (เงินได้ประเภท 40(1)) ตามชุดสมมติฐานที่ทีมกำหนด ไม่รวมค่าลดหย่อนคู่สมรสและรายการพิเศษอื่น ๆ")
+st.caption("เกณฑ์ที่ใช้: ผู้มีเงินเดือน (เงินได้ประเภท 40(1)) ตามชุดสมมติฐานที่ทีมกำหนดสำหรับปีภาษีที่เลือก รองรับค่าลดหย่อนคู่สมรส ไม่รวมรายการพิเศษอื่น ๆ")
 
 with st.expander("ดูการคิดภาษีแบบขั้นบันได (0% - 35%) เทียบก่อน/หลังใช้กองทุน"):
-    before, after = tc.tax_by_bracket(result["net_income"]), tc.tax_by_bracket(max(result["net_income"] - result["invest"], 0))
+    before, after = tc.tax_by_bracket(result["net_income"], year), tc.tax_by_bracket(max(result["net_income"] - result["invest"], 0), year)
     ladder = pd.DataFrame({"ช่วงเงินได้สุทธิ (บาท)": [b[0] for b in before], "อัตรา": [f"{b[1]:.0%}" for b in before],
                            "ภาษีก่อนใช้กองทุน": [f"{b[3]:,.0f}" for b in before], "ภาษีหลังใช้กองทุน": [f"{a[3]:,.0f}" for a in after]})
     ladder.loc[len(ladder)] = ["รวม", "", f"{result['tax_before']:,.0f}", f"{result['tax_after']:,.0f}"]
@@ -111,8 +116,14 @@ else:
              f"({baht(result['equity_amount'])}) และตราสารหนี้/ตลาดเงินประมาณ {(1 - row['equity_share']) * 100:.0f}% ({baht(result['bond_amount'])})")
     if result["limited_by_cap"]:
         st.warning(f"งบที่ตั้งไว้เกินวงเงินลดหย่อนที่ใช้ได้ ({baht(result['cap_total'])}) ระบบจึงแนะนำเพียงเท่าวงเงิน")
-    st.bar_chart(pd.DataFrame({"จำนวนเงิน (บาท)": [result["rmf"], result["thaiesg"], result["equity_amount"], result["bond_amount"]]},
-                              index=["RMF", "ThaiESG", "ตราสารทุน", "ตราสารหนี้"]))
+    fig, ax = plt.subplots(figsize=(6, 3.2))
+    labels = ["RMF", "ThaiESG", "Equity", "Bond"]
+    vals = [result["rmf"], result["thaiesg"], result["equity_amount"], result["bond_amount"]]
+    bars = ax.bar(labels, vals, color=["#1f77b4", "#1f77b4", "#2ca02c", "#ff7f0e"])
+    for b_, v_ in zip(bars, vals):
+        ax.text(b_.get_x() + b_.get_width() / 2, v_, f"{v_:,.0f}", ha="center", va="bottom", fontsize=9)
+    ax.set_ylabel("Baht"); ax.spines[["top", "right"]].set_visible(False)
+    st.pyplot(fig); plt.close(fig)
     st.caption("แท่ง RMF/ThaiESG แสดงช่องทางลดหย่อน ส่วนแท่งตราสารทุน/หนี้แสดงลักษณะสินทรัพย์ในกองทุน (นับรวมแยกกัน ไม่ได้บวกกัน)")
 
 if result["cap_total"] > 0 and result["tax_before"] > 0:
@@ -123,10 +134,13 @@ if result["cap_total"] >= 1_000 and result["tax_before"] > 0:
     step = max(1_000, int(result["cap_total"] // 100 // 1_000 * 1_000)) or 1_000
     amounts = list(range(0, int(result["cap_total"]) + 1, step))
     what_if = st.slider("จำนวนเงินที่ลงทุนในกองทุนลดหย่อน (บาท)", 0, int(result["cap_total"]), min(int(result["invest"]), int(result["cap_total"])), step=1_000)
-    w = tc.plan(age, income, dependents, insurance, pvd, budget, row["equity_share"], invest_override=what_if)
+    w = tc.plan(age, income, dependents, insurance, pvd, budget, row["equity_share"], invest_override=what_if, spouse=spouse, year=year)
     st.write(f"ลงทุน {baht(w['invest'])} → ภาษีที่ประหยัดได้ **{baht(w['tax_saved'])}**")
-    curve = [tc.plan(age, income, dependents, insurance, pvd, budget, row["equity_share"], invest_override=a)["tax_saved"] for a in amounts]
-    st.line_chart(pd.DataFrame({"ภาษีที่ประหยัดได้ (บาท)": curve}, index=amounts))
+    curve = [tc.plan(age, income, dependents, insurance, pvd, budget, row["equity_share"], invest_override=a, spouse=spouse, year=year)["tax_saved"] for a in amounts]
+    fig2, ax2 = plt.subplots(figsize=(6, 3.2))
+    ax2.plot(amounts, curve, color="#1f77b4"); ax2.scatter([w["invest"]], [w["tax_saved"]], color="#d62728", zorder=3)
+    ax2.set_xlabel("Fund investment (baht)"); ax2.set_ylabel("Tax saved (baht)"); ax2.spines[["top", "right"]].set_visible(False)
+    st.pyplot(fig2); plt.close(fig2)
 elif result["tax_before"] <= 0:
     st.write("รายได้สุทธิของคุณไม่ถึงเกณฑ์เสียภาษี จึงไม่มีภาษีให้ลด การเปลี่ยนจำนวนเงินลงทุนจะไม่ทำให้ภาษีเปลี่ยน")
 else:
@@ -140,7 +154,7 @@ with st.expander("โมเดลทำงานอย่างไร และ�
 - **ผลทดสอบ:** Silhouette {mt['silhouette_model']:.3f} (baseline อายุอย่างเดียว {mt['silhouette_age_only_baseline']:.3f}, สุ่ม {mt['silhouette_random_baseline']:.3f}) ·
   สัดส่วนหุ้นคลาดเคลื่อนจากความเสี่ยงของผู้ใช้ลดลงจาก {mt['equity_mae_one_size']:.3f} เป็น {mt['equity_mae_model']:.3f}
 - **การเลือกจำนวนกลุ่ม:** ดู Elbow Method และ Silhouette Score ในตารางด้านล่าง ทีมเลือก k = {info['n_clusters']} เพราะตรงกับการแบ่งช่วงวัยในโครงร่าง (Silhouette ต่ำกว่า k ที่ดีที่สุดเล็กน้อย)
-- **ข้อจำกัด:** ฝึกด้วย **ข้อมูลจำลอง** ผลจึงยืนยันว่าระบบทำงานได้ แต่ยังไม่ได้พิสูจน์กับผู้ใช้จริง · กติกาภาษีเป็นแบบย่อสำหรับผู้มีเงินเดือน (ไม่รวมคู่สมรส เงินได้ประเภทอื่น ฯลฯ) ·
+- **ข้อจำกัด:** ฝึกด้วย **ข้อมูลจำลอง** ผลจึงยืนยันว่าระบบทำงานได้ แต่ยังไม่ได้พิสูจน์กับผู้ใช้จริง · กติกาภาษีเป็นแบบย่อสำหรับผู้มีเงินเดือน (ไม่รวมเงินได้ประเภทอื่น ฯลฯ) ·
   วงเงินและอัตราต้องตรวจกับประกาศกรมสรรพากรของปีภาษีนั้น
 - **ไม่ควรเชื่อโมเดลเมื่อ:** ค่าที่กรอกอยู่นอกช่วงข้อมูลฝึก หรือมีรายการลดหย่อนพิเศษที่ระบบไม่รองรับ
 - แหล่งโมเดล: {source}
@@ -148,9 +162,11 @@ with st.expander("โมเดลทำงานอย่างไร และ�
     kc = get_k_curve()
     e1, e2 = st.columns(2)
     e1.caption("Elbow Method: inertia ของแต่ละ k (ยิ่งต่ำยิ่งแน่น มองหาจุดที่ลดลงช้าลง)")
-    e1.line_chart(kc.set_index("k")[["inertia"]])
+    f1, x1 = plt.subplots(figsize=(4, 2.8)); x1.plot(kc["k"], kc["inertia"], marker="o"); x1.set_xlabel("k"); x1.set_ylabel("Inertia")
+    x1.axvline(info["n_clusters"], ls="--", color="gray"); e1.pyplot(f1); plt.close(f1)
     e2.caption("Silhouette Score ของแต่ละ k (ยิ่งสูงยิ่งแยกกลุ่มชัด)")
-    e2.line_chart(kc.set_index("k")[["silhouette"]])
+    f2, x2 = plt.subplots(figsize=(4, 2.8)); x2.plot(kc["k"], kc["silhouette"], marker="o", color="#2ca02c"); x2.set_xlabel("k"); x2.set_ylabel("Silhouette")
+    x2.axvline(info["n_clusters"], ls="--", color="gray"); e2.pyplot(f2); plt.close(f2)
     st.dataframe(kc.round(3), hide_index=True, use_container_width=True)
 
 st.caption("⚠️ เครื่องมือนี้เป็นสื่อการเรียนรู้ของโครงงานวิชา INI 373 ไม่ใช่คำแนะนำทางการเงินหรือภาษีอย่างเป็นทางการ ไม่เก็บข้อมูลส่วนบุคคลของผู้ใช้")
