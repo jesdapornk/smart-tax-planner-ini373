@@ -100,7 +100,7 @@ if result["cap_total"] > 0 and result["tax_before"] > 0:
     st.write(f"**ถ้าลงทุนเต็มวงเงิน** ({baht(result['cap_total'])}) จะประหยัดภาษีได้สูงสุด **{baht(result['max_saved'])}**")
 
 st.subheader("ลองเปลี่ยนค่า (What-if)")
-if result["cap_total"] >= 1_000:
+if result["cap_total"] >= 1_000 and result["tax_before"] > 0:
     step = max(1_000, int(result["cap_total"] // 100 // 1_000 * 1_000)) or 1_000
     amounts = list(range(0, int(result["cap_total"]) + 1, step))
     what_if = st.slider("จำนวนเงินที่ลงทุนในกองทุนลดหย่อน (บาท)", 0, int(result["cap_total"]), min(int(result["invest"]), int(result["cap_total"])), step=1_000)
@@ -108,6 +108,8 @@ if result["cap_total"] >= 1_000:
     st.write(f"ลงทุน {baht(w['invest'])} → ภาษีที่ประหยัดได้ **{baht(w['tax_saved'])}**")
     curve = [tc.plan(age, income, dependents, insurance, pvd, budget, row["equity_share"], invest_override=a)["tax_saved"] for a in amounts]
     st.line_chart(pd.DataFrame({"ภาษีที่ประหยัดได้ (บาท)": curve}, index=amounts))
+elif result["tax_before"] <= 0:
+    st.write("รายได้สุทธิของคุณไม่ถึงเกณฑ์เสียภาษี จึงไม่มีภาษีให้ลด การเปลี่ยนจำนวนเงินลงทุนจะไม่ทำให้ภาษีเปลี่ยน")
 else:
     st.write("วงเงินลดหย่อนที่ใช้ได้น้อยเกินกว่าจะจำลอง")
 
