@@ -20,6 +20,11 @@ div[data-testid="stMetricValue"] { font-size: 1.7rem; }
 """, unsafe_allow_html=True)
 
 
+@st.cache_data
+def get_k_curve():
+    return tc.k_curve(ROOT)
+
+
 @st.cache_resource
 def get_model():
     return tc.load_model(ROOT)
@@ -53,7 +58,7 @@ st.subheader("ขั้นที่ 1: กรอกข้อมูลของ�
 st.selectbox("เริ่มจากตัวอย่าง หรือกรอกเอง", list(PERSONAS), key="persona", on_change=apply_persona)
 c1, c2 = st.columns(2)
 with c1:
-    age = st.number_input("อายุ (ปี)", min_value=18, max_value=100, step=1, key="age")
+    age = st.number_input("อายุ (ปี)", min_value=20, max_value=100, step=1, key="age")
     income = st.number_input("เงินได้ต่อปี (บาท)", min_value=0, max_value=50_000_000, step=10_000, key="income")
     dependents = st.number_input("ผู้อยู่ในอุปการะ (คน)", min_value=0, max_value=10, step=1, key="dependents")
 with c2:
@@ -78,6 +83,20 @@ m1, m2, m3 = st.columns(3)
 m1.metric("ภาษีก่อนใช้กองทุน", baht(result["tax_before"]))
 m2.metric("ภาษีหลังใช้กองทุน", baht(result["tax_after"]))
 m3.metric("ภาษีที่ประหยัดได้", baht(result["tax_saved"]))
+
+st.markdown("**วิธีคิดเงินได้สุทธิ (ก่อนซื้อกองทุนลดหย่อน)**")
+ded = pd.DataFrame([("เงินได้ต่อปี", income)] + [(f"หัก: {n}", v) for n, v in result["deductions"] if v > 0]
+                   + [("เงินได้สุทธิก่อนซื้อกองทุน", result["net_income"])], columns=["รายการ", "บาท"])
+ded["บาท"] = ded["บาท"].map(lambda x: f"{x:,.0f}")
+st.dataframe(ded, hide_index=True, use_container_width=True)
+st.caption("เกณฑ์ที่ใช้: ผู้มีเงินเดือน (เงินได้ประเภท 40(1)) ตามชุดสมมติฐานที่ทีมกำหนด ไม่รวมค่าลดหย่อนคู่สมรสและรายการพิเศษอื่น ๆ")
+
+with st.expander("ดูการคิดภาษีแบบขั้นบันได (0% - 35%) เทียบก่อน/หลังใช้กองทุน"):
+    before, after = tc.tax_by_bracket(result["net_income"]), tc.tax_by_bracket(max(result["net_income"] - result["invest"], 0))
+    ladder = pd.DataFrame({"ช่วงเงินได้สุทธิ (บาท)": [b[0] for b in before], "อัตรา": [f"{b[1]:.0%}" for b in before],
+                           "ภาษีก่อนใช้กองทุน": [f"{b[3]:,.0f}" for b in before], "ภาษีหลังใช้กองทุน": [f"{a[3]:,.0f}" for a in after]})
+    ladder.loc[len(ladder)] = ["รวม", "", f"{result['tax_before']:,.0f}", f"{result['tax_after']:,.0f}"]
+    st.dataframe(ladder, hide_index=True, use_container_width=True)
 
 st.subheader("ขั้นที่ 3: คำแนะนำสำหรับคุณ")
 if result["tax_before"] <= 0:
@@ -120,10 +139,18 @@ with st.expander("โมเดลทำงานอย่างไร และ�
 - **ภาษีที่ประหยัดได้** คำนวณจากสูตรภาษีตามกฎหมาย ไม่ได้มาจาก ML ส่วน ML ช่วยเลือกลักษณะกองทุนที่เหมาะกับกลุ่ม
 - **ผลทดสอบ:** Silhouette {mt['silhouette_model']:.3f} (baseline อายุอย่างเดียว {mt['silhouette_age_only_baseline']:.3f}, สุ่ม {mt['silhouette_random_baseline']:.3f}) ·
   สัดส่วนหุ้นคลาดเคลื่อนจากความเสี่ยงของผู้ใช้ลดลงจาก {mt['equity_mae_one_size']:.3f} เป็น {mt['equity_mae_model']:.3f}
+- **การเลือกจำนวนกลุ่ม:** ดู Elbow Method และ Silhouette Score ในตารางด้านล่าง ทีมเลือก k = {info['n_clusters']} เพราะตรงกับการแบ่งช่วงวัยในโครงร่าง (Silhouette ต่ำกว่า k ที่ดีที่สุดเล็กน้อย)
 - **ข้อจำกัด:** ฝึกด้วย **ข้อมูลจำลอง** ผลจึงยืนยันว่าระบบทำงานได้ แต่ยังไม่ได้พิสูจน์กับผู้ใช้จริง · กติกาภาษีเป็นแบบย่อสำหรับผู้มีเงินเดือน (ไม่รวมคู่สมรส เงินได้ประเภทอื่น ฯลฯ) ·
   วงเงินและอัตราต้องตรวจกับประกาศกรมสรรพากรของปีภาษีนั้น
 - **ไม่ควรเชื่อโมเดลเมื่อ:** ค่าที่กรอกอยู่นอกช่วงข้อมูลฝึก หรือมีรายการลดหย่อนพิเศษที่ระบบไม่รองรับ
 - แหล่งโมเดล: {source}
 """)
+    kc = get_k_curve()
+    e1, e2 = st.columns(2)
+    e1.caption("Elbow Method: inertia ของแต่ละ k (ยิ่งต่ำยิ่งแน่น มองหาจุดที่ลดลงช้าลง)")
+    e1.line_chart(kc.set_index("k")[["inertia"]])
+    e2.caption("Silhouette Score ของแต่ละ k (ยิ่งสูงยิ่งแยกกลุ่มชัด)")
+    e2.line_chart(kc.set_index("k")[["silhouette"]])
+    st.dataframe(kc.round(3), hide_index=True, use_container_width=True)
 
 st.caption("⚠️ เครื่องมือนี้เป็นสื่อการเรียนรู้ของโครงงานวิชา INI 373 ไม่ใช่คำแนะนำทางการเงินหรือภาษีอย่างเป็นทางการ ไม่เก็บข้อมูลส่วนบุคคลของผู้ใช้")
