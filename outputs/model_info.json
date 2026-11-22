@@ -1,0 +1,74 @@
+{
+  "project": "Smart Tax Planner (INI 373)",
+  "model_type": "KMeans clustering (Pipeline: StandardScaler + KMeans)",
+  "features": [
+    "age",
+    "log_income",
+    "risk_score",
+    "deduction_ratio"
+  ],
+  "n_clusters": 3,
+  "k_selection": {
+    "k_best_silhouette": 2,
+    "k_chosen": 3,
+    "reason": "Proposal defines 3 age groups (20-49, 50-59, 60+); chosen k separates seniors at a small silhouette cost"
+  },
+  "random_seed": 42,
+  "data": {
+    "source": "synthetic (simulated users)",
+    "rows": 1500,
+    "train": 1200,
+    "test": 300
+  },
+  "metrics_test": {
+    "silhouette_model": 0.269,
+    "silhouette_random_baseline": -0.016,
+    "silhouette_age_only_baseline": 0.197,
+    "ari_stability_mean": 0.9963,
+    "ari_stability_strict_n_init1_mean": 0.7188,
+    "equity_mae_model": 0.128,
+    "equity_mae_one_size": 0.1839,
+    "mean_tax_saved_baht": 6724.53
+  },
+  "cluster_profiles": {
+    "0": {
+      "n": 418.0,
+      "age": 44.74162679425837,
+      "income": 913413.8755980862,
+      "risk_score": 3.1698564593301435,
+      "deduction_ratio": 0.09652655502392345,
+      "description": "วัยทำงาน (20-49) · รายได้สูง · รับความเสี่ยงปานกลาง",
+      "recommended_equity_share": 0.5339712918660288
+    },
+    "1": {
+      "n": 462.0,
+      "age": 28.70995670995671,
+      "income": 380220.7792207792,
+      "risk_score": 4.0,
+      "deduction_ratio": 0.13893225108225107,
+      "description": "วัยทำงาน (20-49) · รายได้น้อย · รับความเสี่ยงสูง",
+      "recommended_equity_share": 0.7000000000000001
+    },
+    "2": {
+      "n": 320.0,
+      "age": 61.659375,
+      "income": 517537.5,
+      "risk_score": 1.65625,
+      "deduction_ratio": 0.10304031250000001,
+      "description": "ผู้สูงอายุ (60+) · รายได้ปานกลาง · รับความเสี่ยงต่ำ",
+      "recommended_equity_share": 0.23125
+    }
+  },
+  "tax_assumptions": "Employment income (40(1)); expense deduction 50% max 100k; personal 60k; dependents 30k each; social security 9k; retirement group (PVD+RMF) <= 500k and RMF <= 30% income; ThaiESG <= 30% income and <= 300k. Verify with Revenue Department for the tax year used.",
+  "limitations": [
+    "synthetic data",
+    "recommendation rule is team-designed, not learned from outcomes",
+    "not official financial/tax advice"
+  ],
+  "versions": {
+    "python": "3.13.18",
+    "scikit-learn": "1.6.1",
+    "pandas": "2.2.3",
+    "numpy": "2.4.6"
+  }
+}

@@ -1,0 +1,127 @@
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import streamlit as st
+
+ROOT = Path(__file__).parent
+sys.path.insert(0, str(ROOT))
+import tax_core as tc
+
+st.set_page_config(page_title="Smart Tax Planner", page_icon="💰", layout="centered")
+st.markdown("""
+<style>
+html, body, [class*="st-"] { font-size: 18px; }
+h1 { font-size: 2.0rem !important; }
+div[data-testid="stMetricValue"] { font-size: 1.7rem; }
+.stButton button { font-size: 1.1rem; }
+</style>
+""", unsafe_allow_html=True)
+
+
+@st.cache_resource
+def get_model():
+    return tc.load_model(ROOT)
+
+
+model, info, profile, source = get_model()
+baht = lambda x: f"{x:,.0f} บาท"
+
+PERSONAS = {
+    "กรอกข้อมูลเอง": None,
+    "คุณสมชาย (55 ปี เงินเดือนสูง รับความเสี่ยงต่ำ)": dict(age=55, income=700_000, dependents=1, insurance=20_000, pvd=0, risk=2, budget=70_000),
+    "คุณนที (27 ปี เพิ่งเริ่มงาน รับความเสี่ยงสูง)": dict(age=27, income=420_000, dependents=0, insurance=0, pvd=0, risk=4, budget=25_000),
+    "คุณป้าสมศรี (68 ปี มีบำนาญและเงินลงทุน)": dict(age=68, income=500_000, dependents=0, insurance=15_000, pvd=0, risk=1, budget=40_000),
+}
+DEFAULTS = dict(age=35, income=600_000, dependents=0, insurance=0, pvd=0, risk=3, budget=50_000)
+for k, v in DEFAULTS.items():
+    st.session_state.setdefault(k, v)
+
+
+def apply_persona():
+    p = PERSONAS[st.session_state["persona"]]
+    if p:
+        for k, v in p.items():
+            st.session_state[k] = v
+
+
+st.title("💰 Smart Tax Planner")
+st.caption("ประเมินภาษีเงินได้บุคคลธรรมดา และแนะนำกองทุนลดหย่อนภาษี (RMF / ThaiESG) ที่เหมาะกับอายุ รายได้ และความเสี่ยงของคุณ")
+
+st.subheader("ขั้นที่ 1: กรอกข้อมูลของคุณ")
+st.selectbox("เริ่มจากตัวอย่าง หรือกรอกเอง", list(PERSONAS), key="persona", on_change=apply_persona)
+c1, c2 = st.columns(2)
+with c1:
+    age = st.number_input("อายุ (ปี)", min_value=18, max_value=100, step=1, key="age")
+    income = st.number_input("เงินได้ต่อปี (บาท)", min_value=0, max_value=50_000_000, step=10_000, key="income")
+    dependents = st.number_input("ผู้อยู่ในอุปการะ (คน)", min_value=0, max_value=10, step=1, key="dependents")
+with c2:
+    insurance = st.number_input("เบี้ยประกันชีวิต/สุขภาพต่อปี (บาท)", min_value=0, max_value=1_000_000, step=1_000, key="insurance")
+    pvd = st.number_input("เงินสะสมกองทุนสำรองเลี้ยงชีพต่อปี (บาท)", min_value=0, max_value=1_000_000, step=1_000, key="pvd")
+    budget = st.number_input("งบที่ตั้งใจลงทุนในกองทุนลดหย่อนต่อปี (บาท)", min_value=0, max_value=10_000_000, step=5_000, key="budget")
+risk = st.select_slider("ความเสี่ยงที่คุณรับได้", options=[1, 2, 3, 4, 5], format_func=lambda r: tc.RISK_LABELS[r], key="risk")
+
+lo_a, hi_a = tc.TRAIN_RANGE["age"]; lo_i, hi_i = tc.TRAIN_RANGE["income"]
+if not (lo_a <= age <= hi_a) or not (lo_i <= income <= hi_i):
+    st.warning(f"ค่าที่กรอกอยู่นอกช่วงข้อมูลที่ใช้ฝึกโมเดล (อายุ {lo_a}-{hi_a} ปี, เงินได้ {lo_i:,}-{hi_i:,} บาท) ผลการจัดกลุ่มอาจไม่น่าเชื่อถือ")
+
+cluster = tc.assign_cluster(model, age, income, risk, insurance, pvd, dependents)
+row = profile.loc[cluster]
+result = tc.plan(age, income, dependents, insurance, pvd, budget, row["equity_share"])
+
+st.subheader("ขั้นที่ 2: ผลการวิเคราะห์")
+st.info(f"**โมเดลจัดคุณอยู่ในกลุ่ม:** {row['description']}  \n"
+        f"(กลุ่มนี้มีอายุเฉลี่ย {row['age']:.0f} ปี ความเสี่ยงเฉลี่ย {row['risk_score']:.1f} จาก 5)")
+
+m1, m2, m3 = st.columns(3)
+m1.metric("ภาษีก่อนใช้กองทุน", baht(result["tax_before"]))
+m2.metric("ภาษีหลังใช้กองทุน", baht(result["tax_after"]))
+m3.metric("ภาษีที่ประหยัดได้", baht(result["tax_saved"]))
+
+st.subheader("ขั้นที่ 3: คำแนะนำสำหรับคุณ")
+if result["tax_before"] <= 0:
+    st.success("รายได้สุทธิของคุณยังไม่ถึงเกณฑ์เสียภาษี **การซื้อกองทุนลดหย่อนจึงไม่ช่วยลดภาษี** ไม่จำเป็นต้องซื้อเพื่อลดหย่อน ถ้าจะลงทุนให้พิจารณาจากเป้าหมายการออมของคุณเอง")
+elif result["invest"] <= 0:
+    st.warning("ยังไม่ได้ตั้งงบลงทุน ลองกรอกงบที่ตั้งใจลงทุนด้านบน หรือดูตัวอย่างการลองเปลี่ยนค่าด้านล่าง")
+else:
+    per_baht = result["tax_saved"] / result["invest"]
+    st.success(f"**แนะนำให้ลงทุน {baht(result['invest'])}** แบ่งเป็น RMF {baht(result['rmf'])} และ ThaiESG {baht(result['thaiesg'])} "
+               f"จะลดภาษีได้ **{baht(result['tax_saved'])}** (ทุก 1 บาทที่ลงทุน ลดภาษีได้ประมาณ {per_baht * 100:.0f} สตางค์)")
+    st.write(f"**ลักษณะกองทุนที่เหมาะกับกลุ่มของคุณ:** ตราสารทุนประมาณ {row['equity_share'] * 100:.0f}% "
+             f"({baht(result['equity_amount'])}) และตราสารหนี้/ตลาดเงินประมาณ {(1 - row['equity_share']) * 100:.0f}% ({baht(result['bond_amount'])})")
+    if result["limited_by_cap"]:
+        st.warning(f"งบที่ตั้งไว้เกินวงเงินลดหย่อนที่ใช้ได้ ({baht(result['cap_total'])}) ระบบจึงแนะนำเพียงเท่าวงเงิน")
+    st.bar_chart(pd.DataFrame({"จำนวนเงิน (บาท)": [result["rmf"], result["thaiesg"], result["equity_amount"], result["bond_amount"]]},
+                              index=["RMF", "ThaiESG", "ตราสารทุน", "ตราสารหนี้"]))
+    st.caption("แท่ง RMF/ThaiESG แสดงช่องทางลดหย่อน ส่วนแท่งตราสารทุน/หนี้แสดงลักษณะสินทรัพย์ในกองทุน (นับรวมแยกกัน ไม่ได้บวกกัน)")
+
+if result["cap_total"] > 0 and result["tax_before"] > 0:
+    st.write(f"**ถ้าลงทุนเต็มวงเงิน** ({baht(result['cap_total'])}) จะประหยัดภาษีได้สูงสุด **{baht(result['max_saved'])}**")
+
+st.subheader("ลองเปลี่ยนค่า (What-if)")
+if result["cap_total"] >= 1_000:
+    step = max(1_000, int(result["cap_total"] // 100 // 1_000 * 1_000)) or 1_000
+    amounts = list(range(0, int(result["cap_total"]) + 1, step))
+    what_if = st.slider("จำนวนเงินที่ลงทุนในกองทุนลดหย่อน (บาท)", 0, int(result["cap_total"]), min(int(result["invest"]), int(result["cap_total"])), step=1_000)
+    w = tc.plan(age, income, dependents, insurance, pvd, budget, row["equity_share"], invest_override=what_if)
+    st.write(f"ลงทุน {baht(w['invest'])} → ภาษีที่ประหยัดได้ **{baht(w['tax_saved'])}**")
+    curve = [tc.plan(age, income, dependents, insurance, pvd, budget, row["equity_share"], invest_override=a)["tax_saved"] for a in amounts]
+    st.line_chart(pd.DataFrame({"ภาษีที่ประหยัดได้ (บาท)": curve}, index=amounts))
+else:
+    st.write("วงเงินลดหย่อนที่ใช้ได้น้อยเกินกว่าจะจำลอง")
+
+with st.expander("โมเดลทำงานอย่างไร และข้อจำกัด (อ่านก่อนใช้)"):
+    mt = info["metrics_test"]
+    st.markdown(f"""
+- **วิธีการ:** จัดกลุ่มผู้ใช้ด้วย K-Means ({info['n_clusters']} กลุ่ม) จากอายุ รายได้ ความเสี่ยง และภาระลดหย่อน แล้วเลือกสัดส่วนกองทุนตราสารทุน/หนี้ตามกลุ่ม
+- **ภาษีที่ประหยัดได้** คำนวณจากสูตรภาษีตามกฎหมาย ไม่ได้มาจาก ML ส่วน ML ช่วยเลือกลักษณะกองทุนที่เหมาะกับกลุ่ม
+- **ผลทดสอบ:** Silhouette {mt['silhouette_model']:.3f} (baseline อายุอย่างเดียว {mt['silhouette_age_only_baseline']:.3f}, สุ่ม {mt['silhouette_random_baseline']:.3f}) ·
+  สัดส่วนหุ้นคลาดเคลื่อนจากความเสี่ยงของผู้ใช้ลดลงจาก {mt['equity_mae_one_size']:.3f} เป็น {mt['equity_mae_model']:.3f}
+- **ข้อจำกัด:** ฝึกด้วย **ข้อมูลจำลอง** ผลจึงยืนยันว่าระบบทำงานได้ แต่ยังไม่ได้พิสูจน์กับผู้ใช้จริง · กติกาภาษีเป็นแบบย่อสำหรับผู้มีเงินเดือน (ไม่รวมคู่สมรส เงินได้ประเภทอื่น ฯลฯ) ·
+  วงเงินและอัตราต้องตรวจกับประกาศกรมสรรพากรของปีภาษีนั้น
+- **ไม่ควรเชื่อโมเดลเมื่อ:** ค่าที่กรอกอยู่นอกช่วงข้อมูลฝึก หรือมีรายการลดหย่อนพิเศษที่ระบบไม่รองรับ
+- แหล่งโมเดล: {source}
+""")
+
+st.caption("⚠️ เครื่องมือนี้เป็นสื่อการเรียนรู้ของโครงงานวิชา INI 373 ไม่ใช่คำแนะนำทางการเงินหรือภาษีอย่างเป็นทางการ ไม่เก็บข้อมูลส่วนบุคคลของผู้ใช้")
