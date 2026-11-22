@@ -60,6 +60,8 @@ st.caption("ประเมินภาษีเงินได้บุคค�
 st.subheader("ขั้นที่ 1: กรอกข้อมูลของคุณ")
 st.selectbox("เริ่มจากตัวอย่าง หรือกรอกเอง", list(PERSONAS), key="persona", on_change=apply_persona)
 year = st.selectbox("ปีภาษีที่ใช้คำนวณ", sorted(tc.TAX_RULES), key="year", format_func=lambda y: f"ปีภาษี {y}")
+rule = tc.TAX_RULES[year]
+(st.info if rule["verified"] else st.warning)(("✅ " if rule["verified"] else "⚠️ ") + rule["note"])
 c1, c2 = st.columns(2)
 with c1:
     age = st.number_input("อายุ (ปี)", min_value=20, max_value=100, step=1, key="age")
@@ -126,8 +128,19 @@ else:
     st.pyplot(fig); plt.close(fig)
     st.caption("แท่ง RMF/ThaiESG แสดงช่องทางลดหย่อน ส่วนแท่งตราสารทุน/หนี้แสดงลักษณะสินทรัพย์ในกองทุน (นับรวมแยกกัน ไม่ได้บวกกัน)")
 
-if result["cap_total"] > 0 and result["tax_before"] > 0:
-    st.write(f"**ถ้าลงทุนเต็มวงเงิน** ({baht(result['cap_total'])}) จะประหยัดภาษีได้สูงสุด **{baht(result['max_saved'])}**")
+if result["max_invest"] > 0 and result["tax_before"] > 0:
+    st.markdown("**แผนที่ประหยัดภาษีสูงสุดภายใต้เพดานสิทธิ**")
+    st.success(f"ลงทุน **{baht(result['max_invest'])}** (RMF {baht(result['rmf_max'])} + ThaiESG {baht(result['esg_max'])}) "
+               f"ภาษีจะลดจาก {baht(result['tax_before'])} เหลือ {baht(result['tax_after_max'])} ประหยัดสูงสุด **{baht(result['max_saved'])}**")
+    st.caption("ยอดนี้คือเพดานสิทธิหรือเงินได้สุทธิ แล้วแต่อย่างใดต่ำกว่า ลงทุนเกินนี้ไม่ช่วยลดภาษีเพิ่ม และต้องดูว่าเงินก้อนนี้เหมาะกับสภาพคล่องของคุณ (ThaiESG ต้องถือ 5 ปีขึ้นไป)")
+    if row["equity_share"] is not None:
+        ftype = tc.fund_type_for(row["equity_share"])
+        funds = tc.load_funds(ROOT)
+        ex = funds[funds["fund_type"] == ftype]
+        if len(ex):
+            st.markdown(f"**ตัวอย่างกองทุน ThaiESG ประเภท{ftype} จากแหล่งสาธารณะ** (กลุ่มของคุณเหมาะกับกองทุนแนวหุ้นประมาณ {row['equity_share'] * 100:.0f}%)")
+            st.dataframe(ex[["fund_name", "scheme", "fund_type", "policy_summary"]].rename(columns={"fund_name": "ชื่อกองทุน", "scheme": "ประเภทสิทธิ", "fund_type": "ประเภทกองทุน", "policy_summary": "นโยบายโดยสรุป"}), hide_index=True, use_container_width=True)
+            st.caption("ที่มา: บทความ InnovestX Café Invest (เก็บข้อมูล 22 พ.ย. 2569) เป็นเพียงตัวอย่างประกอบ ไม่ใช่คำแนะนำซื้อขาย และยังไม่ได้ประเมินผลตอบแทนหรือค่าธรรมเนียม ตัวอย่างกองทุน RMF ยังไม่ได้รวบรวม")
 
 st.subheader("ลองเปลี่ยนค่า (What-if)")
 if result["cap_total"] >= 1_000 and result["tax_before"] > 0:

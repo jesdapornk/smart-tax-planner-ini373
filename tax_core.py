@@ -32,8 +32,12 @@ RMF_PVD_CAP, ESG_CAP = 500_000, 300_000  # RMF รวม PVD ไม่เกิ�
 _BASE = dict(brackets=BRACKETS, personal=PERSONAL_ALLOWANCE, spouse=SPOUSE_ALLOWANCE, dependent=DEPENDENT_ALLOWANCE,
              social=SOCIAL_SECURITY, expense_rate=EXPENSE_RATE, expense_cap=EXPENSE_CAP, senior=SENIOR_EXEMPT,
              fund_rate=FUND_RATE, rmf_pvd_cap=RMF_PVD_CAP, esg_cap=ESG_CAP)
-TAX_RULES = {2567: dict(_BASE), 2568: dict(_BASE), 2569: dict(_BASE)}
-DEFAULT_YEAR = 2569
+TAX_RULES = {
+    2567: dict(_BASE, verified=False, note="ทีมยังไม่ได้ตรวจเกณฑ์ปีนี้ ใช้ค่าเดียวกับปี 2568"),
+    2568: dict(_BASE, verified=True, note="ตรวจเทียบกับบทความสรุปเกณฑ์กรมสรรพากรปีภาษี 2568 (aeon.co.th) แล้ว: ส่วนตัว/คู่สมรส 60,000, ประกันสังคมไม่เกิน 9,000, RMF 30% ไม่เกิน 500,000 (รวมกลุ่มเกษียณ), ThaiESG 30% ไม่เกิน 300,000"),
+    2569: dict(_BASE, verified=False, note="ยังไม่ยืนยันเกณฑ์ปีนี้ทั้งหมด: เพดาน ThaiESG/ThaiESGX 30% ไม่เกิน 300,000 เท่าเดิม แต่ผลิตภัณฑ์ที่ใช้สิทธิและเงื่อนไขอาจต่างจากปี 2568 ต้องตรวจกับกรมสรรพากร"),
+}
+DEFAULT_YEAR = 2568
 
 TRAIN_RANGE = {"age": (20, 75), "income": (120_000, 6_000_000)}   # ช่วงข้อมูลที่ใช้ฝึกโมเดล
 RISK_LABELS = {1: "1 ต่ำมาก", 2: "2 ต่ำ", 3: "3 ปานกลาง", 4: "4 สูง", 5: "5 สูงมาก"}
@@ -156,10 +160,28 @@ def plan(age, income, dependents, insurance, pvd, budget, equity_share, invest_o
         esg = min(invest, esg_cap); rmf = invest - esg
     tax_before = income_tax(net, year)
     tax_after = income_tax(max(net - invest, 0.0), year)
-    tax_max = income_tax(max(net - cap_total, 0.0), year)
+    max_invest = float(min(cap_total, net))          # ลงทุนเกินเงินได้สุทธิไม่ช่วยลดภาษีเพิ่ม
+    if age >= 45:
+        rmf_max = min(max_invest, rmf_cap); esg_max = max_invest - rmf_max
+    else:
+        esg_max = min(max_invest, esg_cap); rmf_max = max_invest - esg_max
+    tax_max = income_tax(max(net - max_invest, 0.0), year)
     return {"net_income": net, "rmf_cap": rmf_cap, "esg_cap": esg_cap, "cap_total": cap_total,
             "invest": invest, "rmf": rmf, "thaiesg": esg,
             "equity_amount": invest * equity_share, "bond_amount": invest * (1 - equity_share),
             "deductions": deduction_detail(income, dependents, insurance, pvd, age, spouse, year),
             "tax_before": tax_before, "tax_after": tax_after, "tax_saved": tax_before - tax_after,
-            "max_saved": tax_before - tax_max, "limited_by_cap": wanted > cap_total + 1e-9}
+            "max_saved": tax_before - tax_max, "max_invest": max_invest, "rmf_max": rmf_max, "esg_max": esg_max, "tax_after_max": tax_max, "limited_by_cap": wanted > cap_total + 1e-9}
+
+
+def fund_type_for(equity_share):
+    """จับคู่สัดส่วนหุ้นที่แนะนำกับประเภทกองทุนในรายการตัวอย่าง"""
+    return "หุ้น" if equity_share >= 0.60 else "ผสม" if equity_share >= 0.35 else "ตราสารหนี้"
+
+
+def load_funds(root):
+    root = Path(root)
+    for d in (root / "outputs", root):
+        if (d / "funds_reference.csv").exists():
+            return pd.read_csv(d / "funds_reference.csv")
+    return pd.DataFrame(columns=["fund_name", "scheme", "fund_type", "policy_summary", "source_url", "retrieved"])
