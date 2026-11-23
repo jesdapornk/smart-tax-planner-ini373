@@ -21,7 +21,7 @@ BRACKETS = [  # (เพดานของขั้น, อัตรา) ตร�
 PERSONAL_ALLOWANCE = 60_000          # ค่าลดหย่อนส่วนตัว
 SPOUSE_ALLOWANCE = 60_000            # ค่าลดหย่อนคู่สมรสที่ไม่มีเงินได้
 DEPENDENT_ALLOWANCE = 30_000         # ค่าลดหย่อนผู้อยู่ในอุปการะ คนละ
-SOCIAL_SECURITY = 9_000              # เงินสมทบประกันสังคม: ทีมสมมติให้ทุกคนจ่ายเต็มเพดานต่อปี
+SOCIAL_SECURITY = 9_000              # ค่าเริ่มต้นของช่องประกันสังคม (เพดานเงินสมทบต่อปี) ผู้ใช้แก้ได้
 EXPENSE_RATE, EXPENSE_CAP = 0.5, 100_000   # ค่าใช้จ่ายร้อยละ 50 ไม่เกิน 100,000
 SENIOR_EXEMPT = 190_000              # เงินได้ที่ยกเว้นสำหรับผู้มีอายุ 65 ปีขึ้นไป
 FUND_RATE = 0.30                     # RMF/ThaiESG ไม่เกินร้อยละ 30 ของเงินได้
@@ -34,7 +34,7 @@ _BASE = dict(brackets=BRACKETS, personal=PERSONAL_ALLOWANCE, spouse=SPOUSE_ALLOW
              fund_rate=FUND_RATE, rmf_pvd_cap=RMF_PVD_CAP, esg_cap=ESG_CAP)
 TAX_RULES = {
     2567: dict(_BASE, verified=False, note="ทีมยังไม่ได้ตรวจเกณฑ์ปีนี้ ใช้ค่าเดียวกับปี 2568"),
-    2568: dict(_BASE, verified=True, note="ตรวจเทียบกับคู่มือ ภ.ง.ด.90 ปีภาษี 2568 ของกรมสรรพากร (rd.go.th) แล้ว: ค่าใช้จ่าย 50% ไม่เกิน 100,000, ส่วนตัว/คู่สมรส 60,000, บุตรคนละ 30,000, ผู้มีอายุ 65 ปีขึ้นไปยกเว้น 190,000, RMF 30% ไม่เกิน 500,000 (รวมกลุ่มเกษียณ), ThaiESG 30% ไม่เกิน 300,000 (ซื้อปี 2567-2569) ส่วนประกันสังคม 9,000 บาทเป็นสมมติฐานของทีม (กรมสรรพากรให้หักตามที่จ่ายจริง) และยังไม่รวมบุตรคนที่ 2 ที่เกิดตั้งแต่ปี 2561"),
+    2568: dict(_BASE, verified=True, note="ตรวจเทียบกับคู่มือ ภ.ง.ด.90 ปีภาษี 2568 ของกรมสรรพากร (rd.go.th) แล้ว: ค่าใช้จ่าย 50% ไม่เกิน 100,000, ส่วนตัว/คู่สมรส 60,000, บุตรคนละ 30,000, ผู้มีอายุ 65 ปีขึ้นไปยกเว้น 190,000, RMF 30% ไม่เกิน 500,000 (รวมกลุ่มเกษียณ), ThaiESG 30% ไม่เกิน 300,000 (ซื้อปี 2567-2569) ประกันสังคมหักตามที่จ่ายจริง (ผู้ใช้กรอก) และบุตรคนที่ 2 ที่เกิดตั้งแต่ปี 2561 เพิ่มอีกคนละ 30,000"),
     2569: dict(_BASE, verified=False, note="ยังไม่ยืนยันเกณฑ์ปีนี้ทั้งหมด: เพดาน ThaiESG/ThaiESGX 30% ไม่เกิน 300,000 เท่าเดิม แต่ผลิตภัณฑ์ที่ใช้สิทธิและเงื่อนไขอาจต่างจากปี 2568 ต้องตรวจกับกรมสรรพากร"),
 }
 DEFAULT_YEAR = 2568
@@ -52,7 +52,7 @@ def income_tax(net_income, year=DEFAULT_YEAR):
     return tax
 
 
-def deduction_detail(income, dependents, insurance, pvd, age=40, spouse=False, year=DEFAULT_YEAR):
+def deduction_detail(income, dependents, insurance, pvd, age=40, spouse=False, year=DEFAULT_YEAR, social=None, kids_2561=0):
     """แจกแจงการหักค่าใช้จ่ายและค่าลดหย่อน (ใช้ทั้งคำนวณและแสดงบนหน้าเว็บ)"""
     r = TAX_RULES[year]
     items = [
@@ -61,15 +61,16 @@ def deduction_detail(income, dependents, insurance, pvd, age=40, spouse=False, y
         ("ค่าลดหย่อนส่วนตัว", r["personal"]),
         ("ค่าลดหย่อนคู่สมรส (ไม่มีเงินได้)", r["spouse"] if spouse else 0.0),
         (f"ค่าลดหย่อนผู้อยู่ในอุปการะ ({dependents} คน)", r["dependent"] * dependents),
-        ("ประกันสังคม (สมมติฐานของทีม)", r["social"]),
+        (f"บุตรคนที่ 2 เป็นต้นไปที่เกิดตั้งแต่ปี 2561 เพิ่มอีกคนละ ({min(kids_2561, dependents)} คน)", r["dependent"] * min(kids_2561, dependents)),
+        ("ประกันสังคม (ตามที่จ่ายจริง)", float(r["social"] if social is None else social)),
         ("เบี้ยประกันชีวิต/สุขภาพ", float(insurance)),
         ("กองทุนสำรองเลี้ยงชีพ (PVD)", float(pvd)),
     ]
     return items
 
 
-def net_income_before_funds(income, dependents, insurance, pvd, age=40, spouse=False, year=DEFAULT_YEAR):
-    total = sum(v for _, v in deduction_detail(income, dependents, insurance, pvd, age, spouse, year))
+def net_income_before_funds(income, dependents, insurance, pvd, age=40, spouse=False, year=DEFAULT_YEAR, social=None, kids_2561=0):
+    total = sum(v for _, v in deduction_detail(income, dependents, insurance, pvd, age, spouse, year, social, kids_2561))
     return max(income - total, 0.0)
 
 
@@ -145,10 +146,10 @@ def assign_cluster(model, age, income, risk, insurance, pvd, dependents):
     return int(model.predict(row[FEATURES])[0])
 
 
-def plan(age, income, dependents, insurance, pvd, budget, equity_share, invest_override=None, spouse=False, year=DEFAULT_YEAR):
+def plan(age, income, dependents, insurance, pvd, budget, equity_share, invest_override=None, spouse=False, year=DEFAULT_YEAR, social=None, kids_2561=0):
     r = TAX_RULES[year]
     """คืนแผนลงทุนใน RMF/ThaiESG และภาษีที่ประหยัดได้"""
-    net = net_income_before_funds(income, dependents, insurance, pvd, age, spouse, year)
+    net = net_income_before_funds(income, dependents, insurance, pvd, age, spouse, year, social, kids_2561)
     rmf_cap = max(0.0, min(r["fund_rate"] * income, r["rmf_pvd_cap"] - pvd))
     esg_cap = max(0.0, min(r["fund_rate"] * income, r["esg_cap"]))
     cap_total = rmf_cap + esg_cap
@@ -169,7 +170,7 @@ def plan(age, income, dependents, insurance, pvd, budget, equity_share, invest_o
     return {"net_income": net, "rmf_cap": rmf_cap, "esg_cap": esg_cap, "cap_total": cap_total,
             "invest": invest, "rmf": rmf, "thaiesg": esg,
             "equity_amount": invest * equity_share, "bond_amount": invest * (1 - equity_share),
-            "deductions": deduction_detail(income, dependents, insurance, pvd, age, spouse, year),
+            "deductions": deduction_detail(income, dependents, insurance, pvd, age, spouse, year, social, kids_2561),
             "tax_before": tax_before, "tax_after": tax_after, "tax_saved": tax_before - tax_after,
             "max_saved": tax_before - tax_max, "max_invest": max_invest, "rmf_max": rmf_max, "esg_max": esg_max, "tax_after_max": tax_max, "limited_by_cap": wanted > cap_total + 1e-9}
 

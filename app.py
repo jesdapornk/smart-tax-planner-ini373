@@ -44,11 +44,11 @@ baht = lambda x: f"{x:,.0f} บาท"
 
 PERSONAS = {
     "กรอกข้อมูลเอง": None,
-    "คุณสมชาย (55 ปี เงินเดือนสูง รับความเสี่ยงต่ำ)": dict(age=55, income=700_000, dependents=1, insurance=20_000, pvd=0, risk=2, budget=70_000),
-    "คุณนที (27 ปี เพิ่งเริ่มงาน รับความเสี่ยงสูง)": dict(age=27, income=420_000, dependents=0, insurance=0, pvd=0, risk=4, budget=25_000),
-    "คุณป้าสมศรี (68 ปี มีบำนาญและเงินลงทุน)": dict(age=68, income=500_000, dependents=0, insurance=15_000, pvd=0, risk=1, budget=40_000),
+    "คุณสมชาย (55 ปี เงินเดือนสูง รับความเสี่ยงต่ำ)": dict(age=55, income=700_000, dependents=1, insurance=20_000, pvd=0, risk=2, budget=70_000, social=9_000, kids_2561=0),
+    "คุณนที (27 ปี เพิ่งเริ่มงาน รับความเสี่ยงสูง)": dict(age=27, income=420_000, dependents=0, insurance=0, pvd=0, risk=4, budget=25_000, social=9_000, kids_2561=0),
+    "คุณป้าสมศรี (68 ปี มีบำนาญและเงินลงทุน)": dict(age=68, income=500_000, dependents=0, insurance=15_000, pvd=0, risk=1, budget=40_000, social=9_000, kids_2561=0),
 }
-DEFAULTS = dict(year=tc.DEFAULT_YEAR, spouse=False, age=35, income=600_000, dependents=0, insurance=0, pvd=0, risk=3, budget=50_000)
+DEFAULTS = dict(year=tc.DEFAULT_YEAR, spouse=False, age=35, income=600_000, dependents=0, insurance=0, pvd=0, risk=3, budget=50_000, social=9_000, kids_2561=0)
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v)
 
@@ -77,6 +77,12 @@ with c2:
     insurance = st.number_input("เบี้ยประกันชีวิต/สุขภาพต่อปี (บาท)", min_value=0, max_value=1_000_000, step=1_000, key="insurance")
     pvd = st.number_input("เงินสะสมกองทุนสำรองเลี้ยงชีพต่อปี (บาท)", min_value=0, max_value=1_000_000, step=1_000, key="pvd")
     budget = st.number_input("งบที่ตั้งใจลงทุนในกองทุนลดหย่อนต่อปี (บาท)", min_value=0, max_value=10_000_000, step=5_000, key="budget")
+c3, c4 = st.columns(2)
+st.session_state["kids_2561"] = min(st.session_state["kids_2561"], int(dependents))
+with c3:
+    kids_2561 = st.number_input("บุตรคนที่ 2 เป็นต้นไปที่เกิดตั้งแต่ปี 2561 (คน, เพิ่มอีกคนละ 30,000)", min_value=0, max_value=int(dependents), step=1, key="kids_2561")
+with c4:
+    social = st.number_input("เงินสมทบประกันสังคมที่จ่ายจริงต่อปี (บาท, สูงสุด 9,000)", min_value=0, max_value=9_000, step=500, key="social")
 spouse = st.checkbox("มีคู่สมรสที่ไม่มีเงินได้ (ลดหย่อนคู่สมรสได้)", key="spouse")
 risk = st.select_slider("ความเสี่ยงที่คุณรับได้", options=[1, 2, 3, 4, 5], format_func=lambda r: tc.RISK_LABELS[r], key="risk")
 
@@ -86,7 +92,7 @@ if not (lo_a <= age <= hi_a) or not (lo_i <= income <= hi_i):
 
 cluster = tc.assign_cluster(model, age, income, risk, insurance, pvd, dependents)
 row = profile.loc[cluster]
-result = tc.plan(age, income, dependents, insurance, pvd, budget, row["equity_share"], spouse=spouse, year=year)
+result = tc.plan(age, income, dependents, insurance, pvd, budget, row["equity_share"], spouse=spouse, year=year, social=social, kids_2561=kids_2561)
 
 st.subheader("ขั้นที่ 2: ผลการวิเคราะห์")
 band = "วัยทำงาน (20-49 ปี)" if age < 50 else ("วัยใกล้เกษียณ (50-59 ปี)" if age < 60 else "ผู้สูงอายุ (60 ปีขึ้นไป)")
@@ -104,7 +110,7 @@ ded = pd.DataFrame([("เงินได้ต่อปี", income)] + [(f"ห�
                    + [("เงินได้สุทธิก่อนซื้อกองทุน", result["net_income"])], columns=["รายการ", "บาท"])
 ded["บาท"] = ded["บาท"].map(lambda x: f"{x:,.0f}")
 st.dataframe(ded, hide_index=True, use_container_width=True)
-st.caption("เกณฑ์ที่ใช้: ผู้มีเงินเดือน (เงินได้ประเภท 40(1)) รองรับค่าลดหย่อนคู่สมรส ไม่รวมรายการพิเศษอื่น ๆ · สมมติฐานเพิ่มเติมของทีม (ไม่ใช่ข้อมูลที่ผู้ใช้กรอก): ประกันสังคม 9,000 บาทต่อปีทุกคน และผู้อยู่ในอุปการะ (รวมบุตร) นับคนละ 30,000 บาท")
+st.caption("เกณฑ์ที่ใช้: ผู้มีเงินเดือน (เงินได้ประเภท 40(1)) รองรับค่าลดหย่อนคู่สมรส ไม่รวมรายการพิเศษอื่น ๆ · ประกันสังคมหักตามที่ผู้ใช้กรอก (ค่าเริ่มต้น 9,000 ซึ่งเป็นเพดานเงินสมทบต่อปี) · ผู้อยู่ในอุปการะ (รวมบุตร) นับคนละ 30,000 บาท · บุตรคนที่ 2 ที่เกิดตั้งแต่ปี 2561 เพิ่มอีกคนละ 30,000 ตามกรมสรรพากร · ไม่รวมค่าลดหย่อนบิดามารดา ผู้พิการ และรายการพิเศษอื่น ๆ")
 
 with st.expander("ดูการคิดภาษีแบบขั้นบันได (0% - 35%) เทียบก่อน/หลังใช้กองทุน"):
     before, after = tc.tax_by_bracket(result["net_income"], year), tc.tax_by_bracket(max(result["net_income"] - result["invest"], 0), year)
@@ -155,9 +161,9 @@ if result["cap_total"] >= 1_000 and result["tax_before"] > 0:
     step = max(1_000, int(result["cap_total"] // 100 // 1_000 * 1_000)) or 1_000
     amounts = list(range(0, int(result["cap_total"]) + 1, step))
     what_if = st.slider("จำนวนเงินที่ลงทุนในกองทุนลดหย่อน (บาท)", 0, int(result["cap_total"]), min(int(result["invest"]), int(result["cap_total"])), step=1_000)
-    w = tc.plan(age, income, dependents, insurance, pvd, budget, row["equity_share"], invest_override=what_if, spouse=spouse, year=year)
+    w = tc.plan(age, income, dependents, insurance, pvd, budget, row["equity_share"], invest_override=what_if, spouse=spouse, year=year, social=social, kids_2561=kids_2561)
     st.write(f"ลงทุน {baht(w['invest'])} → ภาษีที่ประหยัดได้ **{baht(w['tax_saved'])}**")
-    curve = [tc.plan(age, income, dependents, insurance, pvd, budget, row["equity_share"], invest_override=a, spouse=spouse, year=year)["tax_saved"] for a in amounts]
+    curve = [tc.plan(age, income, dependents, insurance, pvd, budget, row["equity_share"], invest_override=a, spouse=spouse, year=year, social=social, kids_2561=kids_2561)["tax_saved"] for a in amounts]
     fig2, ax2 = plt.subplots(figsize=(6, 3.2))
     ax2.plot(amounts, curve, color="#1f77b4"); ax2.scatter([w["invest"]], [w["tax_saved"]], color="#d62728", zorder=3)
     ax2.set_xlabel("Fund investment (baht)"); ax2.set_ylabel("Tax saved (baht)"); ax2.spines[["top", "right"]].set_visible(False)
