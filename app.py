@@ -19,6 +19,12 @@ html, body, [class*="st-"] { font-size: 18px; }
 h1 { font-size: 2.0rem !important; }
 div[data-testid="stMetricValue"] { font-size: 1.7rem; }
 .stButton button { font-size: 1.1rem; }
+@media (max-width: 640px) {
+  html, body, [class*="st-"] { font-size: 17px; }
+  h1 { font-size: 1.6rem !important; }
+  div[data-testid="stMetricValue"] { font-size: 1.4rem; }
+  div[data-testid="stDataFrame"], table { font-size: 0.9rem; }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -83,6 +89,8 @@ row = profile.loc[cluster]
 result = tc.plan(age, income, dependents, insurance, pvd, budget, row["equity_share"], spouse=spouse, year=year)
 
 st.subheader("ขั้นที่ 2: ผลการวิเคราะห์")
+band = "วัยทำงาน (20-49 ปี)" if age < 50 else ("วัยใกล้เกษียณ (50-59 ปี)" if age < 60 else "ผู้สูงอายุ (60 ปีขึ้นไป)")
+st.markdown(f"**ช่วงวัยของคุณตามโครงร่าง:** {band}")
 st.info(f"**โมเดลจัดคุณอยู่ในกลุ่ม:** {row['description']}  \n"
         f"(กลุ่มนี้มีอายุเฉลี่ย {row['age']:.0f} ปี ความเสี่ยงเฉลี่ย {row['risk_score']:.1f} จาก 5)")
 
