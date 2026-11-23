@@ -66,7 +66,7 @@ c1, c2 = st.columns(2)
 with c1:
     age = st.number_input("อายุ (ปี)", min_value=20, max_value=100, step=1, key="age")
     income = st.number_input("เงินได้ต่อปี (บาท)", min_value=0, max_value=50_000_000, step=10_000, key="income")
-    dependents = st.number_input("ผู้อยู่ในอุปการะ (คน)", min_value=0, max_value=10, step=1, key="dependents")
+    dependents = st.number_input("ผู้อยู่ในอุปการะ เช่น บุตร (คน, ลดหย่อนคนละ 30,000)", min_value=0, max_value=10, step=1, key="dependents")
 with c2:
     insurance = st.number_input("เบี้ยประกันชีวิต/สุขภาพต่อปี (บาท)", min_value=0, max_value=1_000_000, step=1_000, key="insurance")
     pvd = st.number_input("เงินสะสมกองทุนสำรองเลี้ยงชีพต่อปี (บาท)", min_value=0, max_value=1_000_000, step=1_000, key="pvd")
@@ -96,7 +96,7 @@ ded = pd.DataFrame([("เงินได้ต่อปี", income)] + [(f"ห�
                    + [("เงินได้สุทธิก่อนซื้อกองทุน", result["net_income"])], columns=["รายการ", "บาท"])
 ded["บาท"] = ded["บาท"].map(lambda x: f"{x:,.0f}")
 st.dataframe(ded, hide_index=True, use_container_width=True)
-st.caption("เกณฑ์ที่ใช้: ผู้มีเงินเดือน (เงินได้ประเภท 40(1)) ตามชุดสมมติฐานที่ทีมกำหนดสำหรับปีภาษีที่เลือก รองรับค่าลดหย่อนคู่สมรส ไม่รวมรายการพิเศษอื่น ๆ")
+st.caption("เกณฑ์ที่ใช้: ผู้มีเงินเดือน (เงินได้ประเภท 40(1)) รองรับค่าลดหย่อนคู่สมรส ไม่รวมรายการพิเศษอื่น ๆ · สมมติฐานเพิ่มเติมของทีม (ไม่ใช่ข้อมูลที่ผู้ใช้กรอก): ประกันสังคม 9,000 บาทต่อปีทุกคน และผู้อยู่ในอุปการะ (รวมบุตร) นับคนละ 30,000 บาท")
 
 with st.expander("ดูการคิดภาษีแบบขั้นบันได (0% - 35%) เทียบก่อน/หลังใช้กองทุน"):
     before, after = tc.tax_by_bracket(result["net_income"], year), tc.tax_by_bracket(max(result["net_income"] - result["invest"], 0), year)
@@ -138,9 +138,9 @@ if result["max_invest"] > 0 and result["tax_before"] > 0:
         funds = tc.load_funds(ROOT)
         ex = funds[funds["fund_type"] == ftype]
         if len(ex):
-            st.markdown(f"**ตัวอย่างกองทุน ThaiESG ประเภท{ftype} จากแหล่งสาธารณะ** (กลุ่มของคุณเหมาะกับกองทุนแนวหุ้นประมาณ {row['equity_share'] * 100:.0f}%)")
+            st.markdown(f"**ตัวอย่างกองทุน RMF และ ThaiESG ประเภท{ftype} จากแหล่งสาธารณะ** (กลุ่มของคุณเหมาะกับกองทุนแนวหุ้นประมาณ {row['equity_share'] * 100:.0f}%)")
             st.dataframe(ex[["fund_name", "scheme", "fund_type", "policy_summary"]].rename(columns={"fund_name": "ชื่อกองทุน", "scheme": "ประเภทสิทธิ", "fund_type": "ประเภทกองทุน", "policy_summary": "นโยบายโดยสรุป"}), hide_index=True, use_container_width=True)
-            st.caption("ที่มา: บทความ InnovestX Café Invest (เก็บข้อมูล 22 พ.ย. 2569) เป็นเพียงตัวอย่างประกอบ ไม่ใช่คำแนะนำซื้อขาย และยังไม่ได้ประเมินผลตอบแทนหรือค่าธรรมเนียม ตัวอย่างกองทุน RMF ยังไม่ได้รวบรวม")
+            st.caption("ที่มา: เว็บไซต์/บทความสาธารณะของ InnovestX (ThaiESG: Café Invest, RMF: หน้ากองทุน RMF เก็บข้อมูล 22-23 พ.ย. 2569) เป็นเพียงตัวอย่างประกอบ ไม่ใช่คำแนะนำซื้อขาย ระบบไม่มีข้อมูลผลตอบแทนและไม่พยากรณ์ผลตอบแทนของกองทุน")
 
 st.subheader("ลองเปลี่ยนค่า (What-if)")
 if result["cap_total"] >= 1_000 and result["tax_before"] > 0:
